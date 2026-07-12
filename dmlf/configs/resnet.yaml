@@ -1,0 +1,8 @@
+cluster:
+  nodes: 2
+  backend: gloo
+
+training:
+  script_path: "train.py"
+  nproc_per_node: 1
+  args: ""

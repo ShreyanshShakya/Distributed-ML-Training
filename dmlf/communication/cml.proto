@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package cml;
+
+// Define the Cluster Management Layer (CML) service
+service ClusterManager {
+  // Agent registers itself to the Manager
+  rpc RegisterNode (RegistrationRequest) returns (RegistrationResponse);
+  
+  // Agent sends a periodic heartbeat with hardware metrics
+  rpc SendHeartbeat (HeartbeatRequest) returns (HeartbeatResponse);
+  
+  // Manager streams commands (like LaunchJob, StopJob) down to the Agent
+  // This uses a server-side stream so the agent can keep a connection open
+  rpc ListenForCommands (CommandListenRequest) returns (stream Command);
+  
+  // Agent reports back the status of a job
+  rpc ReportJobStatus (JobStatusRequest) returns (JobStatusResponse);
+  
+  // User CLI submits a new job to the cluster manager
+  rpc SubmitJob (JobSubmitRequest) returns (JobSubmitResponse);
+}
+
+// ----------------------------------------------------------------------------
+// Registration
+// ----------------------------------------------------------------------------
+message RegistrationRequest {
+  string hostname = 1;
+  string ip_address = 2;
+  int32 cpu_count = 3;
+  string gpu_model = 4;
+  string ram_total = 5;
+}
+
+message RegistrationResponse {
+  bool success = 1;
+  string node_id = 2;
+  string message = 3;
+}
+
+// ----------------------------------------------------------------------------
+// Heartbeats
+// ----------------------------------------------------------------------------
+message HeartbeatRequest {
+  string node_id = 1;
+  float cpu_percent = 2;
+  float ram_percent = 3;
+  float gpu_utilization = 4;
+  float gpu_memory_mb = 5;
+  string current_status = 6; // "idle", "training", "offline"
+}
+
+message HeartbeatResponse {
+  bool acknowledged = 1;
+}
+
+// ----------------------------------------------------------------------------
+// Commands (Manager -> Agent)
+// ----------------------------------------------------------------------------
+message CommandListenRequest {
+  string node_id = 1;
+}
+
+message Command {
+  string command_id = 1;
+  
+  enum CommandType {
+    UNKNOWN = 0;
+    LAUNCH_JOB = 1;
+    STOP_JOB = 2;
+  }
+  CommandType type = 2;
+  
+  // Payload for LAUNCH_JOB
+  JobPayload job_payload = 3;
+}
+
+message JobPayload {
+  string job_id = 1;
+  int32 nnodes = 2;
+  int32 node_rank = 3;
+  string master_addr = 4;
+  int32 master_port = 5;
+  int32 nproc_per_node = 6;
+  string script_path = 7;
+  string args = 8;
+}
+
+// ----------------------------------------------------------------------------
+// Job Status (Agent -> Manager)
+// ----------------------------------------------------------------------------
+message JobStatusRequest {
+  string node_id = 1;
+  string job_id = 2;
+  string status = 3; // "starting", "running", "failed", "completed"
+  string error_message = 4;
+}
+
+message JobStatusResponse {
+  bool acknowledged = 1;
+}
+
+// ----------------------------------------------------------------------------
+// Job Submission (CLI -> Manager)
+// ----------------------------------------------------------------------------
+message JobSubmitRequest {
+  string script_path = 1;
+  int32 nnodes = 2;
+  int32 nproc_per_node = 3;
+  string args = 4;
+}
+
+message JobSubmitResponse {
+  bool success = 1;
+  string job_id = 2;
+  string message = 3;
+}
