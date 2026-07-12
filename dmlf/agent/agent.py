@@ -2,6 +2,7 @@ import time
 import grpc
 import threading
 import sys
+import argparse
 
 from dmlf.communication import cml_pb2
 from dmlf.communication import cml_pb2_grpc
@@ -113,7 +114,11 @@ class NodeAgent:
                 time.sleep(5)
 
 if __name__ == '__main__':
-    agent = NodeAgent()
+    parser = argparse.ArgumentParser(description="DMLF Node Agent")
+    parser.add_argument("--manager", type=str, default="localhost:50051", help="Address of the Cluster Manager")
+    args = parser.parse_args()
+
+    agent = NodeAgent(manager_addr=args.manager)
     try:
         agent.start()
     except KeyboardInterrupt:
