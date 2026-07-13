@@ -14,7 +14,7 @@ class NodeAgent:
     def __init__(self, manager_addr: str = "localhost:50051"):
         self.manager_addr = manager_addr
         self.node_id = None
-        self.status = "idle"
+        self.status = "IDLE"
         self.launcher = JobLauncher()
         self.channel = grpc.insecure_channel(self.manager_addr)
         self.stub = cml_pb2_grpc.ClusterManagerStub(self.channel)
@@ -59,7 +59,8 @@ class NodeAgent:
                     ram_percent=system.get_memory_usage()["percent"],
                     gpu_utilization=gpu_util,
                     gpu_memory_mb=gpu_mem,
-                    current_status=self.status
+                    current_status=self.status,
+                    send_timestamp=time.time()
                 )
                 self.stub.SendHeartbeat(req)
             except grpc.RpcError:
@@ -79,7 +80,7 @@ class NodeAgent:
                 print(f"\n[Command Received]: {command.type} (ID: {command.command_id})")
                 
                 if command.type == cml_pb2.Command.LAUNCH_JOB:
-                    self.status = "training"
+                    self.status = "TRAINING"
                     print("Launching Job...")
                     payload = command.job_payload
                     self.launcher.launch_torchrun(
@@ -90,17 +91,19 @@ class NodeAgent:
                         master_port=payload.master_port,
                         nproc_per_node=payload.nproc_per_node,
                         script_path=payload.script_path,
-                        extra_args=payload.args
+                        extra_args=payload.args,
+                        node_id=self.node_id,
+                        stub=self.stub
                     )
                     
                 elif command.type == cml_pb2.Command.STOP_JOB:
-                    self.status = "idle"
+                    self.status = "IDLE"
                     print("Stopping Job...")
                     self.launcher.stop_current_job()
                     
         except grpc.RpcError as e:
             print(f"Command stream disconnected: {e.details()}")
-            self.status = "offline"
+            self.status = "OFFLINE"
 
     def start(self):
         if self.register():

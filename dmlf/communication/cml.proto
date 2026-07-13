@@ -19,6 +19,9 @@ service ClusterManager {
   
   // User CLI submits a new job to the cluster manager
   rpc SubmitJob (JobSubmitRequest) returns (JobSubmitResponse);
+  
+  // Agent streams structured logs back to the Manager
+  rpc StreamLogs (stream LogMessage) returns (LogAck);
 }
 
 // ----------------------------------------------------------------------------
@@ -48,6 +51,7 @@ message HeartbeatRequest {
   float gpu_utilization = 4;
   float gpu_memory_mb = 5;
   string current_status = 6; // "idle", "training", "offline"
+  double send_timestamp = 7;
 }
 
 message HeartbeatResponse {
@@ -114,4 +118,19 @@ message JobSubmitResponse {
   bool success = 1;
   string job_id = 2;
   string message = 3;
+}
+
+// ----------------------------------------------------------------------------
+// Centralized Logging (Agent -> Manager)
+// ----------------------------------------------------------------------------
+message LogMessage {
+  string timestamp = 1;
+  string node_id = 2;
+  string job_id = 3;
+  string level = 4;
+  string message = 5;
+}
+
+message LogAck {
+  bool acknowledged = 1;
 }

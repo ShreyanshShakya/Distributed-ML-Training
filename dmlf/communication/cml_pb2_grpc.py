@@ -60,6 +60,11 @@ class ClusterManagerStub:
                 request_serializer=dmlf_dot_communication_dot_cml__pb2.JobSubmitRequest.SerializeToString,
                 response_deserializer=dmlf_dot_communication_dot_cml__pb2.JobSubmitResponse.FromString,
                 _registered_method=True)
+        self.StreamLogs = channel.stream_unary(
+                '/cml.ClusterManager/StreamLogs',
+                request_serializer=dmlf_dot_communication_dot_cml__pb2.LogMessage.SerializeToString,
+                response_deserializer=dmlf_dot_communication_dot_cml__pb2.LogAck.FromString,
+                _registered_method=True)
 
 
 class ClusterManagerServicer:
@@ -102,6 +107,13 @@ class ClusterManagerServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def StreamLogs(self, request_iterator, context):
+        """Agent streams structured logs back to the Manager
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_ClusterManagerServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -129,6 +141,11 @@ def add_ClusterManagerServicer_to_server(servicer, server):
                     servicer.SubmitJob,
                     request_deserializer=dmlf_dot_communication_dot_cml__pb2.JobSubmitRequest.FromString,
                     response_serializer=dmlf_dot_communication_dot_cml__pb2.JobSubmitResponse.SerializeToString,
+            ),
+            'StreamLogs': grpc.stream_unary_rpc_method_handler(
+                    servicer.StreamLogs,
+                    request_deserializer=dmlf_dot_communication_dot_cml__pb2.LogMessage.FromString,
+                    response_serializer=dmlf_dot_communication_dot_cml__pb2.LogAck.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -267,6 +284,33 @@ class ClusterManager:
             '/cml.ClusterManager/SubmitJob',
             dmlf_dot_communication_dot_cml__pb2.JobSubmitRequest.SerializeToString,
             dmlf_dot_communication_dot_cml__pb2.JobSubmitResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def StreamLogs(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_unary(
+            request_iterator,
+            target,
+            '/cml.ClusterManager/StreamLogs',
+            dmlf_dot_communication_dot_cml__pb2.LogMessage.SerializeToString,
+            dmlf_dot_communication_dot_cml__pb2.LogAck.FromString,
             options,
             channel_credentials,
             insecure,
