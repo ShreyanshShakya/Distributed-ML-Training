@@ -37,9 +37,15 @@ class NodeRegistry:
                     gpu_model TEXT,
                     ram_total TEXT,
                     status TEXT,
-                    last_heartbeat REAL
+                    last_heartbeat REAL,
+                    node_secret TEXT
                 )
             ''')
+            # Ensure node_secret column exists for older DBs
+            try:
+                cursor.execute("ALTER TABLE nodes ADD COLUMN node_secret TEXT")
+            except sqlite3.OperationalError:
+                pass
             # Metrics table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS metrics (
@@ -78,12 +84,12 @@ class NodeRegistry:
             ''')
             conn.commit()
 
-    def register_node(self, node_id: str, hostname: str, ip_address: str, cpu_count: int, gpu_model: str, ram_total: str) -> bool:
+    def register_node(self, node_id: str, hostname: str, ip_address: str, cpu_count: int, gpu_model: str, ram_total: str, node_secret: str = None) -> bool:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO nodes (node_id, hostname, ip_address, cpu_count, gpu_model, ram_total, status, last_heartbeat)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO nodes (node_id, hostname, ip_address, cpu_count, gpu_model, ram_total, status, last_heartbeat, node_secret)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     hostname=excluded.hostname,
                     ip_address=excluded.ip_address,
@@ -91,8 +97,9 @@ class NodeRegistry:
                     gpu_model=excluded.gpu_model,
                     ram_total=excluded.ram_total,
                     status=excluded.status,
-                    last_heartbeat=excluded.last_heartbeat
-            ''', (node_id, hostname, ip_address, cpu_count, gpu_model, ram_total, NodeState.IDLE, time.time()))
+                    last_heartbeat=excluded.last_heartbeat,
+                    node_secret=excluded.node_secret
+            ''', (node_id, hostname, ip_address, cpu_count, gpu_model, ram_total, NodeState.IDLE, time.time(), node_secret))
             conn.commit()
         return True
 
@@ -210,3 +217,11 @@ class NodeRegistry:
                 cursor.execute("SELECT * FROM jobs")
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
+
+    def get_node_secret(self, node_id: str) -> Optional[str]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT node_secret FROM nodes WHERE node_id = ?", (node_id,))
+            row = cursor.fetchone()
+            return row["node_secret"] if row else None

@@ -39,6 +39,7 @@ message RegistrationResponse {
   bool success = 1;
   string node_id = 2;
   string message = 3;
+  string node_secret = 4;
 }
 
 // ----------------------------------------------------------------------------
@@ -88,6 +89,9 @@ message JobPayload {
   int32 nproc_per_node = 6;
   string script_path = 7;
   string args = 8;
+  int32 max_retries = 9;
+  int32 checkpoint_interval_minutes = 10;
+  string backend = 11;
 }
 
 // ----------------------------------------------------------------------------
@@ -112,6 +116,9 @@ message JobSubmitRequest {
   int32 nnodes = 2;
   int32 nproc_per_node = 3;
   string args = 4;
+  int32 max_retries = 5;
+  int32 checkpoint_interval_minutes = 6;
+  string backend = 7;
 }
 
 message JobSubmitResponse {

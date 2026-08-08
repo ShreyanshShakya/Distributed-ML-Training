@@ -5,6 +5,8 @@ import json
 import os
 import sqlite3
 import threading
+import asyncio
+import secrets
 from concurrent import futures
 from typing import Dict, Any, List
 
@@ -14,6 +16,9 @@ from dmlf.manager.node_registry import NodeRegistry, NodeState, JobState
 from dmlf.manager.queue import JobQueue
 from dmlf.manager.allocator import NodeAllocator
 from dmlf.manager.scheduler import Scheduler
+from dmlf.settings import load_settings, get_settings
+from dmlf.manager.health import create_health_app, run_health_server
+from dmlf.communication.auth import TokenServerInterceptor, NodeSecretServerInterceptor
 
 class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
     def __init__(self, registry: NodeRegistry, job_queue: JobQueue):
@@ -29,13 +34,15 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
 
     def RegisterNode(self, request, context):
         node_id = f"node-{uuid.uuid4().hex[:8]}"
+        node_secret = secrets.token_urlsafe(16)
         success = self.registry.register_node(
             node_id=node_id,
             hostname=request.hostname,
             ip_address=request.ip_address,
             cpu_count=request.cpu_count,
             gpu_model=request.gpu_model,
-            ram_total=request.ram_total
+            ram_total=request.ram_total,
+            node_secret=node_secret
         )
         
         with self.lock:
@@ -46,7 +53,8 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
         return cml_pb2.RegistrationResponse(
             success=success,
             node_id=node_id,
-            message="Successfully registered with Cluster Manager."
+            message="Successfully registered with Cluster Manager.",
+            node_secret=node_secret
         )
 
     def SendHeartbeat(self, request, context):
@@ -156,7 +164,10 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
             "script_path": request.script_path,
             "required_nodes": request.nnodes,
             "args": request.args,
-            "nproc_per_node": request.nproc_per_node
+            "nproc_per_node": request.nproc_per_node,
+            "max_retries": request.max_retries,
+            "checkpoint_interval_minutes": request.checkpoint_interval_minutes,
+            "backend": request.backend
         }
         
         # Pushes to in-memory queue and SQLite durable storage
@@ -209,33 +220,48 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
                     master_port=master_port,
                     nproc_per_node=job["nproc_per_node"],
                     script_path=job["script_path"],
-                    args=job["args"]
+                    args=job["args"],
+                    max_retries=job.get("max_retries", 3),
+                    checkpoint_interval_minutes=job.get("checkpoint_interval_minutes", 5),
+                    backend=job.get("backend", "gloo")
                 )
             )
             self.send_command(node["node_id"], cmd)
 
 
-def serve(port=50051):
+def serve(config_path: str = "config.yaml"):
+    settings = load_settings(config_path)
+    mgr_settings = settings.manager
+
     registry = NodeRegistry()
     queue_mgr = JobQueue(registry)
     
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    # Interceptors for auth
+    token_interceptor = TokenServerInterceptor()
+    node_secret_interceptor = NodeSecretServerInterceptor(registry)
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), interceptors=[token_interceptor, node_secret_interceptor])
     servicer = ClusterManagerServicer(registry, queue_mgr)
     cml_pb2_grpc.add_ClusterManagerServicer_to_server(servicer, server)
-    server.add_insecure_port(f'[::]:{port}')
+    server.add_insecure_port(f'[::]:{mgr_settings.grpc_port}')
     server.start()
-    print(f"Cluster Manager started on port {port}")
+    print(f"Cluster Manager started on port {mgr_settings.grpc_port}")
     
-    # Start the Smart Scheduler
+    # Start health HTTP server in background thread
+    health_app = create_health_app(registry)
+    def run_health():
+        asyncio.run(run_health_server(health_app, mgr_settings.http_health_port))
+    threading.Thread(target=run_health, daemon=True).start()
+    print(f"Health endpoint listening on port {mgr_settings.http_health_port}")
+    
+    # Start the Smart Scheduler with configured interval
     allocator = NodeAllocator()
-    scheduler = Scheduler(registry, queue_mgr, allocator, on_job_allocated=servicer.dispatch_allocated_job)
+    scheduler = Scheduler(registry, queue_mgr, allocator, on_job_allocated=servicer.dispatch_allocated_job, interval_sec=mgr_settings.scheduler_interval_sec)
     scheduler.start()
     
     # Background thread to monitor offline nodes
     def monitor_nodes():
         while True:
-            # First, check which nodes are about to be marked disconnected
-            cutoff_time = time.time() - 15.0
+            cutoff_time = time.time() - mgr_settings.offline_timeout_sec
             with sqlite3.connect("cluster.db") as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
@@ -247,7 +273,6 @@ def serve(port=50051):
 
             if offline_nodes:
                 print(f"Nodes disconnected: {offline_nodes}")
-                # For each disconnected node, fail any jobs running on it
                 running_jobs = registry.get_jobs(status=JobState.RUNNING)
                 for job in running_jobs:
                     assigned = json.loads(job.get("assigned_nodes", "[]"))
@@ -268,7 +293,6 @@ def serve(port=50051):
                         else:
                             registry.update_job_status(job["job_id"], JobState.FAILED, exit_code=1)
 
-            # Mark them offline in DB
             registry.mark_offline_nodes()
             time.sleep(10)
             
@@ -281,4 +305,8 @@ def serve(port=50051):
         scheduler.stop()
 
 if __name__ == '__main__':
-    serve()
+    import argparse
+    parser = argparse.ArgumentParser(description="DMLF Cluster Manager")
+    parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml")
+    args = parser.parse_args()
+    serve(args.config)

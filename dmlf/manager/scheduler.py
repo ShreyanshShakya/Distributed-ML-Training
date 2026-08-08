@@ -7,11 +7,12 @@ from dmlf.manager.allocator import NodeAllocator
 from dmlf.manager.node_registry import NodeRegistry, NodeState
 
 class Scheduler:
-    def __init__(self, registry: NodeRegistry, job_queue: JobQueue, allocator: NodeAllocator, on_job_allocated: Callable):
+    def __init__(self, registry: NodeRegistry, job_queue: JobQueue, allocator: NodeAllocator, on_job_allocated: Callable, interval_sec: int = 2):
         self.registry = registry
         self.queue = job_queue
         self.allocator = allocator
         self.on_job_allocated = on_job_allocated
+        self.interval_sec = interval_sec
         self.running = False
         self.thread = None
 
@@ -27,7 +28,7 @@ class Scheduler:
 
     def _scheduler_loop(self):
         while self.running:
-            time.sleep(2)  # Polling interval
+            time.sleep(self.interval_sec)  # Polling interval
             job = self.queue.pop_top_job()
             if not job:
                 continue

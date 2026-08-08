@@ -1,0 +1,18 @@
+manager:
+  grpc_port: 50051
+  http_health_port: 8080
+  heartbeat_interval_sec: 5
+  offline_timeout_sec: 15
+  scheduler_interval_sec: 2
+  auth_token: "CHANGE_ME_32_BYTE_HEX"
+agent:
+  reconnect_base_sec: 2
+  reconnect_max_sec: 30
+allocator:
+  gpu_weight: 1.0
+  cpu_weight: 0.5
+  ram_weight: 0.1
+job_defaults:
+  max_retries: 3
+  checkpoint_interval_minutes: 5
+  backend: "gloo"
