@@ -1,0 +1,45 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.configMapName }}
+  labels:
+    {{- include "dmlf.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    manager:
+      grpc_port: {{ .Values.manager.ports.grpc }}
+      http_health_port: {{ .Values.manager.ports.httpHealth }}
+      heartbeat_interval_sec: 5
+      offline_timeout_sec: 15
+      scheduler_interval_sec: 2
+      auth_token: {{ .Values.global.authToken | quote }}
+    scheduler:
+      plugin: "dmlf.manager.schedulers.builtin:PriorityBinPackScheduler"
+    agent:
+      reconnect_base_sec: 2
+      reconnect_max_sec: 30
+    allocator:
+      gpu_weight: 1.0
+      cpu_weight: 0.5
+      ram_weight: 0.1
+    job_defaults:
+      max_retries: 3
+      checkpoint_interval_minutes: 5
+      backend: "gloo"
+    metrics:
+      manager_port: {{ .Values.manager.ports.metrics }}
+      agent_port: 9091
+    autoscaler:
+      enabled: true
+      interval_sec: 5
+      queue_depth_high: 5
+      avg_cpu_high: 80
+      avg_gpu_high: 70
+      queue_depth_low: 0
+      avg_cpu_low: 20
+      avg_gpu_low: 10
+      scale_in_cooldown_sec: 300
+      scale_callback: "dmlf.autoscaler.default_callback:scale_callback"
+    {{- with .Values.manager.extraConfig }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}

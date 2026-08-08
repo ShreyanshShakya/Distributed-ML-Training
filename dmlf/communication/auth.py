@@ -1,8 +1,5 @@
 import grpc
-from dmlf.settings import get_settings
-
-_settings = get_settings()
-_TOKEN = _settings.manager.auth_token
+from typing import Set
 
 
 class TokenClientInterceptor(grpc.UnaryUnaryClientInterceptor,
@@ -10,10 +7,13 @@ class TokenClientInterceptor(grpc.UnaryUnaryClientInterceptor,
                              grpc.UnaryStreamClientInterceptor,
                              grpc.StreamUnaryClientInterceptor):
     """Adds Authorization metadata to every outgoing RPC."""
+    def __init__(self, token: str):
+        self._token = token
+
     def _add_auth(self, metadata):
         if metadata is None:
             metadata = []
-        return list(metadata) + [("authorization", f"Bearer {_TOKEN}")]
+        return list(metadata) + [("authorization", f"Bearer {self._token}")]
 
     def intercept_unary_unary(self, continuation, client_call_details, request):
         new_details = client_call_details._replace(
@@ -42,10 +42,13 @@ class TokenClientInterceptor(grpc.UnaryUnaryClientInterceptor,
 
 class TokenServerInterceptor(grpc.ServerInterceptor):
     """Validates Authorization metadata on incoming RPCs."""
+    def __init__(self, token: str):
+        self._token = token
+
     def intercept_service(self, continuation, handler_call_details):
         meta = dict(handler_call_details.invocation_metadata or [])
         token = meta.get("authorization", "").removeprefix("Bearer ").strip()
-        if token != _TOKEN:
+        if token != self._token:
             def abort(_, context):
                 context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid token")
             return grpc.unary_unary_rpc_method_handler(abort)
@@ -100,21 +103,54 @@ class NodeSecretClientInterceptor(grpc.UnaryUnaryClientInterceptor,
         return continuation(new_details, request_iterator)
 
 
+# RPC methods that require node authentication (token + node-secret)
+NODE_AUTH_RPCS: Set[str] = {
+    "/cml.ClusterManager/SendHeartbeat",
+    "/cml.ClusterManager/ListenForCommands",
+    "/cml.ClusterManager/ReportJobStatus",
+    "/cml.ClusterManager/StreamLogs",
+}
+
+
 class NodeSecretServerInterceptor(grpc.ServerInterceptor):
-    """Validates node-secret metadata against registry for calls that carry node-id."""
+    """Validates node-secret metadata for RPCs that require node authentication."""
     def __init__(self, registry):
         self.registry = registry
 
     def intercept_service(self, continuation, handler_call_details):
+        method = handler_call_details.method
         meta = dict(handler_call_details.invocation_metadata or [])
         node_id = meta.get("node-id")
         node_secret = meta.get("node-secret")
-        # Skip validation for RegisterNode (no node-id yet)
-        if node_id and node_secret:
+
+        # For node-authenticated RPCs, require both node-id and node-secret
+        if method in NODE_AUTH_RPCS:
+            if not node_id or not node_secret:
+                def abort(_, context):
+                    context.abort(grpc.StatusCode.UNAUTHENTICATED, "missing node credentials")
+                return grpc.unary_unary_rpc_method_handler(abort)
+            
             # Verify secret
             stored = self.registry.get_node_secret(node_id)
             if stored != node_secret:
                 def abort(_, context):
                     context.abort(grpc.StatusCode.UNAUTHENTICATED, "invalid node secret")
                 return grpc.unary_unary_rpc_method_handler(abort)
+
         return continuation(handler_call_details)
+
+
+def create_client_interceptors(token: str) -> list:
+    """Create client interceptors with the given token."""
+    return [
+        TokenClientInterceptor(token),
+        NodeSecretClientInterceptor(),
+    ]
+
+
+def create_server_interceptors(token: str, registry) -> list:
+    """Create server interceptors with the given token and registry."""
+    return [
+        TokenServerInterceptor(token),
+        NodeSecretServerInterceptor(registry),
+    ]

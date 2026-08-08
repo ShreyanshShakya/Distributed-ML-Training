@@ -6,7 +6,7 @@ import argparse
 from dmlf.communication import cml_pb2
 from dmlf.communication import cml_pb2_grpc
 from dmlf.settings import load_settings
-from dmlf.communication.auth import TokenClientInterceptor
+from dmlf.communication.auth import create_client_interceptors
 
 def submit_job(job_config_path: str, manager_addr: str = None, config_path: str = "config.yaml"):
     settings = load_settings(config_path)
@@ -32,7 +32,7 @@ def submit_job(job_config_path: str, manager_addr: str = None, config_path: str 
     )
     
     try:
-        token_interceptor = TokenClientInterceptor()
+        token_interceptor, _ = create_client_interceptors(settings.manager.auth_token)
         base_channel = grpc.insecure_channel(manager_addr)
         channel = grpc.intercept_channel(base_channel, token_interceptor)
         stub = cml_pb2_grpc.ClusterManagerStub(channel)

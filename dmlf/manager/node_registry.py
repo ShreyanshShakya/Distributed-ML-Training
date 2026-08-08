@@ -79,9 +79,20 @@ class NodeRegistry:
                     nproc_per_node INTEGER,
                     args TEXT,
                     retries INTEGER,
-                    max_retries INTEGER
+                    max_retries INTEGER,
+                    checkpoint_interval_minutes INTEGER,
+                    backend TEXT
                 )
             ''')
+            # Migration: add missing columns if they don't exist
+            try:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN checkpoint_interval_minutes INTEGER")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+            try:
+                cursor.execute("ALTER TABLE jobs ADD COLUMN backend TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
             conn.commit()
 
     def register_node(self, node_id: str, hostname: str, ip_address: str, cpu_count: int, gpu_model: str, ram_total: str, node_secret: str = None) -> bool:
@@ -156,14 +167,15 @@ class NodeRegistry:
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                INSERT INTO jobs (job_id, job_name, status, script_path, config_path, required_nodes, assigned_nodes, priority, created_at, experiment_id, nproc_per_node, args, retries, max_retries)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO jobs (job_id, job_name, status, script_path, config_path, required_nodes, assigned_nodes, priority, created_at, experiment_id, nproc_per_node, args, retries, max_retries, checkpoint_interval_minutes, backend)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 job_data["job_id"], job_data.get("job_name", "unnamed"), job_data["status"],
                 job_data["script_path"], job_data.get("config_path", ""), job_data["required_nodes"],
                 json.dumps(job_data.get("assigned_nodes", [])), job_data.get("priority", 0),
                 time.time(), job_data.get("experiment_id", ""), job_data.get("nproc_per_node", 1), 
-                job_data.get("args", ""), job_data.get("retries", 0), job_data.get("max_retries", 3)
+                job_data.get("args", ""), job_data.get("retries", 0), job_data.get("max_retries", 3),
+                job_data.get("checkpoint_interval_minutes", 5), job_data.get("backend", "gloo")
             ))
             conn.commit()
             

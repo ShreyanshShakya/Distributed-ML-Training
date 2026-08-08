@@ -1,0 +1,13 @@
+apiVersion: v2
+name: dmlf
+description: Helm chart for Distributed Machine Learning Framework (DMLF)
+type: application
+version: 0.4.0
+appVersion: "0.4.0"
+keywords:
+  - machine-learning
+  - distributed-training
+  - pytorch
+maintainers:
+  - name: Shreyansh Shakya
+    email: shreyansh@example.com

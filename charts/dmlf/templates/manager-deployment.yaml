@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dmlf.fullname" . }}-manager
+  labels:
+    {{- include "dmlf.labels" . | nindent 4 }}
+    app.kubernetes.io/component: manager
+spec:
+  replicas: {{ .Values.manager.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "dmlf.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: manager
+  template:
+    metadata:
+      labels:
+        {{- include "dmlf.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: manager
+    spec:
+      containers:
+        - name: manager
+          image: "{{ .Values.global.image.repository }}:{{ .Values.global.image.tag }}"
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command:
+            - python
+            - -m
+            - dmlf.manager.cluster_manager
+            - --config
+            - /app/config.yaml
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.manager.ports.grpc }}
+            - name: http-health
+              containerPort: {{ .Values.manager.ports.httpHealth }}
+            - name: metrics
+              containerPort: {{ .Values.manager.ports.metrics }}
+          env:
+            - name: PYTHONUNBUFFERED
+              value: "1"
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: secret
+              mountPath: /app/secret
+              readOnly: true
+          resources:
+            {{- toYaml .Values.manager.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ .Values.configMapName }}
+        - name: secret
+          secret:
+            secretName: {{ .Values.secretName }}

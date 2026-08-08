@@ -140,6 +140,20 @@ autoscaler:
 
 ---
 
+## 🔐 Security Considerations
+
+> **Important**: The current implementation uses **shared-token authentication** for gRPC calls, but **does not encrypt the transport**. The gRPC channels use insecure connections (`insecure_channel` / `add_insecure_port`), meaning:
+>
+> - ✅ **Authentication**: Requests are authenticated via shared bearer token + per-node secrets
+> - ❌ **Encryption**: Traffic is sent in plaintext over the network
+> - ❌ **Integrity**: No protection against tampering or replay attacks
+>
+> **For production / untrusted networks**: You **must** enable mTLS (mutual TLS) to encrypt gRPC traffic. The framework is designed to support this by swapping `insecure_channel` / `add_insecure_port` with SSL/TLS credentials. A future release will add a `tls:` section to `config.yaml` and a `mtls: true` flag.
+>
+> **Current threat model**: Suitable for trusted LAN / single-host / Docker Compose environments. Do not expose the gRPC port (50051) to the public internet without mTLS.
+
+---
+
 ## 🏃‍♂️ Quick Start (local simulation)
 
 ```bash

@@ -1,0 +1,22 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "dmlf.fullname" . }}-manager
+  namespace: {{ .Values.serviceMonitor.namespace }}
+  labels:
+    {{- include "dmlf.labels" . | nindent 4 }}
+    {{- range $key, $value := .Values.serviceMonitor.labels }}
+    {{ $key }}: {{ $value }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "dmlf.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: manager
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+      path: /metrics
+{{- end }}

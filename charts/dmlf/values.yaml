@@ -1,0 +1,70 @@
+# Default values for DMLF Helm chart
+# --------------------------------------------------------------
+# Global settings
+global:
+  # Docker image to use for both manager and agents
+  image:
+    repository: dmlf
+    tag: latest
+    pullPolicy: IfNotPresent
+  # Shared auth token for gRPC authentication
+  authToken: "CHANGE_ME_32_BYTE_HEX"
+
+# Manager configuration
+manager:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+    requests:
+      cpu: "500m"
+      memory: "1Gi"
+  ports:
+    grpc: 50051
+    httpHealth: 8080
+    metrics: 9090
+  # Additional config overrides (merged into config.yaml)
+  extraConfig: {}
+
+# Agent configuration (run as DaemonSet for node‑local agents)
+agent:
+  # Run as DaemonSet (one per node) – set to false to use a Deployment with replicaCount
+  daemonset: true
+  replicaCount: 2          # used only when daemonset: false
+  resources:
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+  # Additional config overrides
+  extraConfig: {}
+
+# Prometheus ServiceMonitor (requires prometheus-operator CRD)
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  scrapeTimeout: 10s
+  labels:
+    release: prometheus
+
+# Kubernetes service for the manager (exposes gRPC, health, metrics)
+service:
+  type: ClusterIP
+  ports:
+    grpc:
+      port: 50051
+      targetPort: 50051
+    httpHealth:
+      port: 8080
+      targetPort: 8080
+    metrics:
+      port: 9090
+      targetPort: 9090
+
+# ConfigMap / Secret names (usually no need to change)
+configMapName: dmlf-config
+secretName: dmlf-secret

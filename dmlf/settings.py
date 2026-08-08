@@ -30,11 +30,53 @@ class JobDefaults(BaseModel):
     backend: str = "gloo"
 
 
+class MetricsSettings(BaseModel):
+    manager_port: int = 9090
+    agent_port: int = 9091
+
+
+class AutoscalerSettings(BaseModel):
+    enabled: bool = True
+    interval_sec: int = 30
+    queue_depth_high: int = 5
+    avg_cpu_high: float = 80.0
+    avg_gpu_high: float = 70.0
+    queue_depth_low: int = 0
+    avg_cpu_low: float = 20.0
+    avg_gpu_low: float = 10.0
+    scale_in_cooldown_sec: int = 300
+    scale_callback: str = "dmlf.autoscaler.default_callback:scale_callback"
+
+
+class SchedulerSettings(BaseModel):
+    plugin: str = "dmlf.manager.schedulers.builtin:PriorityBinPackScheduler"
+
+
+class DistributedSettings(BaseModel):
+    master_port: int = 29500
+    rendezvous_timeout_sec: int = 30
+
+
+class StorageSettings(BaseModel):
+    database_path: str = "cluster.db"
+    log_directory: str = "logs"
+
+
+class MonitorSettings(BaseModel):
+    node_check_interval_sec: int = 10
+
+
 class Settings(BaseModel):
     manager: ManagerSettings = Field(default_factory=ManagerSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     allocator: AllocatorSettings = Field(default_factory=AllocatorSettings)
     job_defaults: JobDefaults = Field(default_factory=JobDefaults)
+    metrics: MetricsSettings = Field(default_factory=MetricsSettings)
+    autoscaler: AutoscalerSettings = Field(default_factory=AutoscalerSettings)
+    scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
+    distributed: DistributedSettings = Field(default_factory=DistributedSettings)
+    storage: StorageSettings = Field(default_factory=StorageSettings)
+    monitor: MonitorSettings = Field(default_factory=MonitorSettings)
 
 
 _settings_instance: Settings | None = None

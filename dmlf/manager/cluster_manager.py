@@ -15,22 +15,30 @@ from dmlf.communication import cml_pb2_grpc
 from dmlf.manager.node_registry import NodeRegistry, NodeState, JobState
 from dmlf.manager.queue import JobQueue
 from dmlf.manager.allocator import NodeAllocator
-from dmlf.manager.scheduler import Scheduler
+from dmlf.manager.scheduler_factory import load_scheduler_class
 from dmlf.settings import load_settings, get_settings
 from dmlf.manager.health import create_health_app, run_health_server
-from dmlf.communication.auth import TokenServerInterceptor, NodeSecretServerInterceptor
+from dmlf.communication.auth import create_server_interceptors
+from dmlf.monitoring.prometheus import (
+    inc_jobs_queued, dec_jobs_queued,
+    inc_jobs_running, dec_jobs_running,
+    observe_job_latency, inc_job_retries,
+    set_nodes_idle, set_nodes_busy, set_nodes_offline,
+)
 
 class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
-    def __init__(self, registry: NodeRegistry, job_queue: JobQueue):
+    def __init__(self, registry: NodeRegistry, job_queue: JobQueue, settings):
         self.registry = registry
         self.queue = job_queue
+        self.settings = settings
         # A dictionary mapping node_id -> Queue to hold pending commands
         import queue as thread_queue
         self.command_queues: Dict[str, thread_queue.Queue] = {}
         self.lock = threading.Lock()
         
-        os.makedirs("logs", exist_ok=True)
-        self.log_file = open("logs/cluster.log", "a", encoding="utf-8")
+        log_dir = settings.storage.log_directory
+        os.makedirs(log_dir, exist_ok=True)
+        self.log_file = open(os.path.join(log_dir, "cluster.log"), "a", encoding="utf-8")
 
     def RegisterNode(self, request, context):
         node_id = f"node-{uuid.uuid4().hex[:8]}"
@@ -111,6 +119,7 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
                     self.log_file.flush()
                     self.registry.update_node_state(request.node_id, NodeState.IDLE)
                     self.queue.retry_job(job)
+                    inc_job_retries()
                 else:
                     log_entry = {
                         "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -126,6 +135,11 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
         elif request.status.lower() == "completed":
             self.registry.update_job_status(request.job_id, JobState.COMPLETED, exit_code=0)
             self.registry.update_node_state(request.node_id, NodeState.IDLE)
+            dec_jobs_running()
+            # latency
+            job = self.registry.get_job(request.job_id)
+            if job and "_submit_ts" in job:
+                observe_job_latency(time.time() - job["_submit_ts"])
             
         return cml_pb2.JobStatusResponse(acknowledged=True)
         
@@ -170,9 +184,10 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
             "backend": request.backend
         }
         
-        # Pushes to in-memory queue and SQLite durable storage
+# Pushes to in-memory queue and SQLite durable storage
         self.queue.submit_job(job_data)
-            
+        inc_jobs_queued()
+             
         return cml_pb2.JobSubmitResponse(
             success=True,
             job_id=job_id,
@@ -203,10 +218,14 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
         
         # Node 0 is master
         master_addr = nodes[0]["ip_address"]
-        master_port = 29500 
+        master_port = self.settings.distributed.master_port 
         
         assigned_node_ids = [n["node_id"] for n in nodes]
         self.registry.update_job_status(job["job_id"], JobState.RUNNING, assigned_nodes=assigned_node_ids)
+        dec_jobs_queued()
+        inc_jobs_running()
+        # record start time for latency
+        job["_submit_ts"] = time.time()
         
         for rank, node in enumerate(nodes):
             cmd = cml_pb2.Command(
@@ -230,21 +249,23 @@ class ClusterManagerServicer(cml_pb2_grpc.ClusterManagerServicer):
 
 
 def serve(config_path: str = "config.yaml"):
+    print("[DEBUG] serve() entered", flush=True)
     settings = load_settings(config_path)
     mgr_settings = settings.manager
 
-    registry = NodeRegistry()
+    registry = NodeRegistry(settings.storage.database_path)
     queue_mgr = JobQueue(registry)
     
     # Interceptors for auth
-    token_interceptor = TokenServerInterceptor()
-    node_secret_interceptor = NodeSecretServerInterceptor(registry)
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), interceptors=[token_interceptor, node_secret_interceptor])
-    servicer = ClusterManagerServicer(registry, queue_mgr)
+    interceptors = create_server_interceptors(settings.manager.auth_token, registry)
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10), interceptors=interceptors)
+    servicer = ClusterManagerServicer(registry, queue_mgr, settings)
     cml_pb2_grpc.add_ClusterManagerServicer_to_server(servicer, server)
     server.add_insecure_port(f'[::]:{mgr_settings.grpc_port}')
+    print("[DEBUG] Starting gRPC server...", flush=True)
     server.start()
-    print(f"Cluster Manager started on port {mgr_settings.grpc_port}")
+    print("[DEBUG] gRPC server started", flush=True)
+    print(f"Cluster Manager started on port {mgr_settings.grpc_port}", flush=True)
     
     # Start health HTTP server in background thread
     health_app = create_health_app(registry)
@@ -254,15 +275,41 @@ def serve(config_path: str = "config.yaml"):
     print(f"Health endpoint listening on port {mgr_settings.http_health_port}")
     
     # Start the Smart Scheduler with configured interval
-    allocator = NodeAllocator()
-    scheduler = Scheduler(registry, queue_mgr, allocator, on_job_allocated=servicer.dispatch_allocated_job, interval_sec=mgr_settings.scheduler_interval_sec)
+    allocator = NodeAllocator(
+        gpu_weight=settings.allocator.gpu_weight,
+        cpu_weight=settings.allocator.cpu_weight,
+        ram_weight=settings.allocator.ram_weight,
+    )
+    SchedulerClass = load_scheduler_class(settings.scheduler.plugin)
+    scheduler = SchedulerClass(
+        registry,
+        queue_mgr,
+        allocator,
+        on_job_allocated=servicer.dispatch_allocated_job,
+        interval_sec=mgr_settings.scheduler_interval_sec,
+    )
     scheduler.start()
+    
+    # Autoscaler (optional)
+    autoscaler = None
+    if settings.autoscaler.enabled:
+        from dmlf.autoscaler.policy import Autoscaler
+        from dmlf.autoscaler.default_callback import scale_callback as default_scale_cb
+        try:
+            cb = Autoscaler.load_callback(settings.autoscaler.scale_callback)
+        except Exception as exc:
+            print(f"[Autoscaler] cannot load callback, falling back to default: {exc}")
+            cb = default_scale_cb
+        autoscaler = Autoscaler(registry, queue_mgr, callback=cb)
+        autoscaler.start()
+        print(f"[Autoscaler] started (interval={settings.autoscaler.interval_sec}s)")
     
     # Background thread to monitor offline nodes
     def monitor_nodes():
         while True:
             cutoff_time = time.time() - mgr_settings.offline_timeout_sec
-            with sqlite3.connect("cluster.db") as conn:
+            db_path = settings.storage.database_path
+            with sqlite3.connect(db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(
@@ -294,7 +341,17 @@ def serve(config_path: str = "config.yaml"):
                             registry.update_job_status(job["job_id"], JobState.FAILED, exit_code=1)
 
             registry.mark_offline_nodes()
-            time.sleep(10)
+            
+            # Update Prometheus gauges with actual node counts from DB
+            all_nodes = registry.get_all_nodes()
+            idle_count = sum(1 for n in all_nodes if n.get("status") == NodeState.IDLE)
+            busy_count = sum(1 for n in all_nodes if n.get("status") == NodeState.TRAINING)
+            offline_count = sum(1 for n in all_nodes if n.get("status") == NodeState.DISCONNECTED)
+            set_nodes_idle(idle_count)
+            set_nodes_busy(busy_count)
+            set_nodes_offline(offline_count)
+            
+            time.sleep(settings.monitor.node_check_interval_sec)
             
     threading.Thread(target=monitor_nodes, daemon=True).start()
     
@@ -303,6 +360,8 @@ def serve(config_path: str = "config.yaml"):
     except KeyboardInterrupt:
         print("Shutting down Cluster Manager...")
         scheduler.stop()
+        if autoscaler:
+            autoscaler.stop()
 
 if __name__ == '__main__':
     import argparse

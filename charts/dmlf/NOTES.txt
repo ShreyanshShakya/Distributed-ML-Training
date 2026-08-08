@@ -1,0 +1,27 @@
+DMLF has been installed.
+
+**Manager**
+- gRPC endpoint: {{ include "dmlf.fullname" . }}-manager:{{ .Values.service.ports.grpc.port }}
+- HTTP health: http://{{ include "dmlf.fullname" . }}-manager:{{ .Values.service.ports.httpHealth.port }}/health
+- Prometheus metrics: http://{{ include "dmlf.fullname" . }}-manager:{{ .Values.service.ports.metrics.port }}/metrics
+
+**Agents**
+Running as {{ if .Values.agent.daemonset }}DaemonSet{{ else }}Deployment (replicas: {{ .Values.agent.replicaCount }}){{ end }}.
+They register automatically with the manager using the shared auth token.
+
+**Configuration**
+All runtime configuration lives in the ConfigMap `{{ .Values.configMapName }}` (key `config.yaml`).
+The gRPC auth token is stored in Secret `{{ .Values.secretName }}` (key `auth_token`).
+
+**Prometheus**
+A ServiceMonitor is {{ if .Values.serviceMonitor.enabled }}enabled{{ else }}disabled{{ end }}.
+If enabled, ensure the `prometheus-operator` CRDs are installed and the `monitoring` namespace (or the one you set) is watched.
+
+**Upgrading**
+To change configuration, edit the ConfigMap/Secret and roll the manager/agent pods:
+```
+kubectl rollout restart deployment/{{ include "dmlf.fullname" . }}-manager
+kubectl rollout restart {{ if .Values.agent.daemonset }}daemonset{{ else }}deployment{{ end }}/{{ include "dmlf.fullname" . }}-agent
+```
+
+Happy distributed training!

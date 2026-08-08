@@ -1,13 +1,56 @@
+# Virtual environments
 venv/
 bin/
 lib/
 lib64/
 pyvenv.cfg
+.venv/
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
+*.pyd
+
+# Test and lint cache
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime artifacts
 logs/
-dmlf/checkpoint/
+*.log
 cluster.db
+*.sqlite
+*.sqlite3
+*.db
+dmlf/checkpoint/
+
+# Data
 data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (should never be committed)
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets.yaml
+*.env
+
+# Distribution
+dist/
+build/
+*.egg-info/

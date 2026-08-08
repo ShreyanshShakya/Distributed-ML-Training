@@ -10,7 +10,7 @@ from dmlf.agent import hardware
 from dmlf.agent.launcher import JobLauncher
 from dmlf.monitoring import system
 from dmlf.settings import load_settings, get_settings
-from dmlf.communication.auth import TokenClientInterceptor, NodeSecretClientInterceptor
+from dmlf.communication.auth import create_client_interceptors
 
 class NodeAgent:
     def __init__(self, manager_addr: str = None, config_path: str = "config.yaml"):
@@ -23,9 +23,8 @@ class NodeAgent:
         self.node_secret = None
         self.status = "IDLE"
         self.launcher = JobLauncher()
-        # Interceptors
-        self.token_interceptor = TokenClientInterceptor()
-        self.node_secret_interceptor = NodeSecretClientInterceptor()
+        # Interceptors - created with settings
+        self.token_interceptor, self.node_secret_interceptor = create_client_interceptors(mgr_settings.auth_token)
         base_channel = grpc.insecure_channel(self.manager_addr)
         self.channel = grpc.intercept_channel(base_channel, self.token_interceptor, self.node_secret_interceptor)
         self.stub = cml_pb2_grpc.ClusterManagerStub(self.channel)
